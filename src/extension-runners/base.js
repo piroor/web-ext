@@ -15,6 +15,7 @@ export type ExtensionRunnerParams = {|
   extensions: Array<Extension>,
   profilePath?: string,
   keepProfileChanges: boolean,
+  keepProfileChangesCompletely: boolean,
   startUrl: ?string | ?Array<string>,
 
   // Common injected dependencies.
