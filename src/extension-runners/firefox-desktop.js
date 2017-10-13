@@ -177,6 +177,7 @@ export class FirefoxDesktopExtensionRunner {
       customPrefs,
       extensions,
       keepProfileChanges,
+      keepProfileChangesCompletely,
       preInstall,
       profilePath,
       firefoxApp,
@@ -186,6 +187,11 @@ export class FirefoxDesktopExtensionRunner {
       if (keepProfileChanges) {
         log.debug(`Using Firefox profile from ${profilePath}`);
         this.profile = await firefoxApp.useProfile(profilePath, {customPrefs});
+      } else if (keepProfileChangesCompletely) {
+        log.debug(`Using Firefox profile from ${profilePath}`);
+        this.profile = await firefoxApp.useProfile(profilePath, {
+          noPrefInjection: true
+        });
       } else {
         log.debug(`Copying Firefox profile from ${profilePath}`);
         this.profile = await firefoxApp.copyProfile(profilePath, {customPrefs});

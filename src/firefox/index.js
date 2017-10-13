@@ -298,22 +298,25 @@ export function configureProfile(
     app = 'firefox',
     getPrefs = defaultPrefGetter,
     customPrefs = {},
+    noPrefInjection = false,
   }: ConfigureProfileOptions = {},
 ): Promise<FirefoxProfile> {
   // Set default preferences. Some of these are required for the add-on to
   // operate, such as disabling signatures.
-  const prefs = getPrefs(app);
-  Object.keys(prefs).forEach((pref) => {
-    profile.setPreference(pref, prefs[pref]);
-  });
-  if (Object.keys(customPrefs).length > 0) {
-    const customPrefsStr = JSON.stringify(customPrefs, null, 2);
-    log.info(`Setting custom Firefox preferences: ${customPrefsStr}`);
-    Object.keys(customPrefs).forEach((custom) => {
-      profile.setPreference(custom, customPrefs[custom]);
+  if (!noPrefInjection) {
+    const prefs = getPrefs(app);
+    Object.keys(prefs).forEach((pref) => {
+      profile.setPreference(pref, prefs[pref]);
     });
+    if (Object.keys(customPrefs).length > 0) {
+      const customPrefsStr = JSON.stringify(customPrefs, null, 2);
+      log.info(`Setting custom Firefox preferences: ${customPrefsStr}`);
+      Object.keys(customPrefs).forEach((custom) => {
+        profile.setPreference(custom, customPrefs[custom]);
+      });
+    }
+    profile.updatePreferences();
   }
-  profile.updatePreferences();
   return Promise.resolve(profile);
 }
 
@@ -335,10 +338,11 @@ export async function useProfile(
     configureThisProfile = configureProfile,
     isFirefoxDefaultProfile = isDefaultProfile,
     customPrefs = {},
+    noPrefInjection,
   }: UseProfileParams = {},
 ): Promise<FirefoxProfile> {
   const isForbiddenProfile = await isFirefoxDefaultProfile(profilePath);
-  if (isForbiddenProfile) {
+  if (isForbiddenProfile && !noPrefInjection) {
     throw new UsageError(
       'Cannot use --keep-profile-changes on a default profile' +
       ` ("${profilePath}")` +
@@ -347,7 +351,7 @@ export async function useProfile(
     );
   }
   const profile = new FirefoxProfile({destinationDirectory: profilePath});
-  return await configureThisProfile(profile, {app, customPrefs});
+  return await configureThisProfile(profile, {app, customPrefs, noPrefInjection});
 }
 
 

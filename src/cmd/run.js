@@ -29,6 +29,7 @@ export type CmdRunParams = {|
   firefoxProfile?: string,
   ignoreFiles?: Array<string>,
   keepProfileChanges: boolean,
+  keepProfileChangesCompletely: boolean,
   noInput?: boolean,
   noReload: boolean,
   preInstall: boolean,
@@ -55,6 +56,7 @@ export default async function run(
     firefox,
     firefoxProfile,
     keepProfileChanges = false,
+    keepProfileChangesCompletely = false,
     ignoreFiles,
     noInput = false,
     noReload = false,
@@ -88,6 +90,7 @@ export default async function run(
     // Common options.
     extensions: [{sourceDir, manifestData}],
     keepProfileChanges,
+    keepProfileChangesCompletely,
     startUrl,
     desktopNotifications,
 
