@@ -19,7 +19,7 @@ export type PreferencesAppName = 'firefox' | 'fennec';
 
 // Preferences Maps
 
-const prefsCommon: FirefoxPreferences = {
+const prefsCommonCritical: FirefoxPreferences = {
   // Allow debug output via dump to be printed to the system console
   'browser.dom.window.dump.enabled': true,
   // Warn about possibly incorrect code.
@@ -30,14 +30,6 @@ const prefsCommon: FirefoxPreferences = {
   'devtools.debugger.remote-enabled': true,
   // Disable the prompt for allowing connections.
   'devtools.debugger.prompt-connection': false,
-
-  // Turn off platform logging because it is a lot of info.
-  'extensions.logging.enabled': false,
-
-  // Disable extension updates and notifications.
-  'extensions.checkCompatibility.nightly': false,
-  'extensions.update.enabled': false,
-  'extensions.update.notifyUser': false,
 
   // From:
   // http://hg.mozilla.org/mozilla-central/file/1dd81c324ac7/build/automation.py.in//l372
@@ -50,6 +42,16 @@ const prefsCommon: FirefoxPreferences = {
   'extensions.installDistroAddons': false,
   // Allow installing extensions dropped into the profile folder.
   'extensions.autoDisableScopes': 10,
+};
+
+const prefsCommon: FirefoxPreferences = {
+  // Turn off platform logging because it is a lot of info.
+  'extensions.logging.enabled': false,
+
+  // Disable extension updates and notifications.
+  'extensions.checkCompatibility.nightly': false,
+  'extensions.update.enabled': false,
+  'extensions.update.notifyUser': false,
 
   // Disable app update.
   'app.update.enabled': false,
@@ -65,12 +67,15 @@ const prefsFennec: FirefoxPreferences = {
 };
 
 // Prefs specific to Firefox for desktop.
+const prefsFirefoxCritical: FirefoxPreferences = {
+  'devtools.errorconsole.enabled': true,
+  'devtools.chrome.enabled': true,
+};
+
 const prefsFirefox: FirefoxPreferences = {
   'browser.startup.homepage': 'about:blank',
   'startup.homepage_welcome_url': 'about:blank',
   'startup.homepage_welcome_url.additional': '',
-  'devtools.errorconsole.enabled': true,
-  'devtools.chrome.enabled': true,
 
   // From:
   // http://hg.mozilla.org/mozilla-central/file/1dd81c324ac7/build/automation.py.in//l388
@@ -91,9 +96,25 @@ const prefsFirefox: FirefoxPreferences = {
 };
 
 const prefs = {
-  common: prefsCommon,
-  fennec: prefsFennec,
-  firefox: prefsFirefox,
+  common: {
+    ...prefsCommonCritical,
+    ...prefsCommon,
+  },
+  fennec: {
+    ...prefsCommonCritical,
+    ...prefsCommon,
+    ...prefsFennec,
+  },
+  firefox: {
+    ...prefsCommonCritical,
+    ...prefsCommon,
+    ...prefsFirefoxCritical,
+    ...prefsFirefox,
+  },
+  'firefox-critical': {
+    ...prefsCommonCritical,
+    ...prefsFirefoxCritical,
+  },
 };
 
 
@@ -109,10 +130,7 @@ export function getPrefs(
   if (!appPrefs) {
     throw new WebExtError(`Unsupported application: ${app}`);
   }
-  return {
-    ...prefsCommon,
-    ...appPrefs,
-  };
+  return appPrefs;
 }
 
 export function coerceCLICustomPreference(

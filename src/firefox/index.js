@@ -303,8 +303,11 @@ export function configureProfile(
 ): Promise<FirefoxProfile> {
   // Set default preferences. Some of these are required for the add-on to
   // operate, such as disabling signatures.
-  if (!noPrefInjection) {
-    const prefs = getPrefs(app);
+  if (noPrefInjection) {
+    let prefs = getPrefs('firefox-critical');
+    profile._writeUserPrefs(prefs);
+  } else {
+    let prefs = getPrefs(app);
     Object.keys(prefs).forEach((pref) => {
       profile.setPreference(pref, prefs[pref]);
     });
