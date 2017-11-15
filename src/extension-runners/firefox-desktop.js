@@ -223,6 +223,7 @@ export class FirefoxDesktopExtensionRunner {
       startUrl,
       firefoxApp,
       firefoxClient,
+      allowRemote,
     } = this.params;
 
     const binaryArgs = [];
@@ -239,6 +240,7 @@ export class FirefoxDesktopExtensionRunner {
 
     this.runningInfo = await firefoxApp.run(this.profile, {
       firefoxBinary, binaryArgs,
+      allowRemote,
     });
 
     this.runningInfo.firefox.on('close', () => {

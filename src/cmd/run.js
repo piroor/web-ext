@@ -30,6 +30,7 @@ export type CmdRunParams = {|
   ignoreFiles?: Array<string>,
   keepProfileChanges: boolean,
   keepProfileChangesCompletely: boolean,
+  allowRemote: boolean,
   noInput?: boolean,
   noReload: boolean,
   preInstall: boolean,
@@ -58,6 +59,7 @@ export default async function run(
     keepProfileChanges = false,
     keepProfileChangesCompletely = false,
     ignoreFiles,
+    allowRemote = false,
     noInput = false,
     noReload = false,
     preInstall = false,
@@ -94,6 +96,7 @@ export default async function run(
     extensions: extensions,
     keepProfileChanges,
     keepProfileChangesCompletely,
+    allowRemote,
     startUrl,
     desktopNotifications,
 

@@ -353,6 +353,11 @@ Example: $0 --help run.
         demand: false,
         type: 'boolean',
       },
+      'allow-remote': {
+        describe: 'Run Firefox with remote receiver.',
+        demand: false,
+        type: 'boolean',
+      },
       'no-reload': {
         describe: 'Do not reload the extension when source files change',
         demand: false,

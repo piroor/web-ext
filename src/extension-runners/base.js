@@ -16,6 +16,7 @@ export type ExtensionRunnerParams = {|
   profilePath?: string,
   keepProfileChanges: boolean,
   keepProfileChangesCompletely: boolean,
+  allowRemote: boolean,
   startUrl: ?string | ?Array<string>,
 
   // Common injected dependencies.
