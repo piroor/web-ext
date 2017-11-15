@@ -256,10 +256,6 @@ export class FirefoxDesktopExtensionRunner {
         port: this.runningInfo.debuggerPort,
       });
 
-      await new Promise((aResolve, aReject) => {
-        setTimeout(aResolve, 1500);
-      });
-
       // Install all the temporary addons.
       for (const extension of extensions) {
         try {
