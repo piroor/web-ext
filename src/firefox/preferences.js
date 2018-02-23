@@ -23,7 +23,7 @@ const prefsCommonCritical: FirefoxPreferences = {
   // Allow debug output via dump to be printed to the system console
   'browser.dom.window.dump.enabled': true,
   // Warn about possibly incorrect code.
-  'javascript.options.strict': true,
+  //'javascript.options.strict': true,
   'javascript.options.showInConsole': true,
 
   // Allow remote connections to the debugger.
