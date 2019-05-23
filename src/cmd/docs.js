@@ -1,25 +1,25 @@
 /* @flow */
-import defaultUrlOpener from 'open';
+import opn from 'opn';
 
 import {createLogger} from '../util/logger';
 
 const log = createLogger(__filename);
 
-type DocsParams = {
+export type DocsParams = {
   noInput?: boolean,
   shouldExitProgram?: boolean,
 }
 
-type DocsOptions = {
-  openUrl?: typeof defaultUrlOpener,
+export type DocsOptions = {
+  openUrl?: typeof opn,
 }
 
 export const url = 'https://developer.mozilla.org/en-US/Add-ons' +
   '/WebExtensions/Getting_started_with_web-ext';
 
 export default function docs(
-  params: DocsParams, {openUrl = defaultUrlOpener}: DocsOptions = {}
-) {
+  params: DocsParams, {openUrl = opn}: DocsOptions = {}
+): Promise<void> {
   return new Promise((resolve, reject) => {
     openUrl(url, (error) => {
       if (error) {

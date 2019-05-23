@@ -1,5 +1,5 @@
 /* @flow */
-
+import defaultBuildExtension from './build';
 import {
   showDesktopNotification as defaultDesktopNotifications,
 } from '../util/desktop-notifier';
@@ -10,14 +10,15 @@ import {
 import {createLogger} from '../util/logger';
 import defaultGetValidatedManifest from '../util/manifest';
 import {
+  createExtensionRunner,
   defaultReloadStrategy,
   MultiExtensionRunner as DefaultMultiExtensionRunner,
-  FirefoxDesktopExtensionRunner as DefaultFirefoxDesktopExtensionRunner,
 } from '../extension-runners';
 // Import objects that are only used as Flow types.
 import type {FirefoxPreferences} from '../firefox/preferences';
 
 const log = createLogger(__filename);
+
 
 // Run command types and implementation.
 
@@ -35,16 +36,25 @@ export type CmdRunParams = {|
   noReload: boolean,
   preInstall: boolean,
   sourceDir: string,
-  startUrl?: string | Array<string>,
+  startUrl?: Array<string>,
+  target?: Array<string>,
+  args?: Array<string>,
+
+  // Android CLI options.
+  adbBin?: string,
+  adbHost?: string,
+  adbPort?: string,
+  adbDevice?: string,
+  firefoxApk?: string,
 |};
 
 export type CmdRunOptions = {|
+  buildExtension: typeof defaultBuildExtension,
   desktopNotifications: typeof defaultDesktopNotifications,
   firefoxApp: typeof defaultFirefoxApp,
   firefoxClient: typeof defaultFirefoxClient,
   reloadStrategy: typeof defaultReloadStrategy,
   shouldExitProgram?: boolean,
-  FirefoxDesktopExtensionRunner?: typeof DefaultFirefoxDesktopExtensionRunner,
   MultiExtensionRunner?: typeof DefaultMultiExtensionRunner,
   getValidatedManifest?: typeof defaultGetValidatedManifest,
 |};
@@ -65,13 +75,21 @@ export default async function run(
     preInstall = false,
     sourceDir,
     startUrl,
+    target,
+    // Android CLI options.
+    adbBin,
+    adbHost,
+    adbPort,
+    adbDevice,
+    firefoxApk,
+    args,
   }: CmdRunParams,
   {
+    buildExtension = defaultBuildExtension,
     desktopNotifications = defaultDesktopNotifications,
     firefoxApp = defaultFirefoxApp,
     firefoxClient = defaultFirefoxClient,
     reloadStrategy = defaultReloadStrategy,
-    FirefoxDesktopExtensionRunner = DefaultFirefoxDesktopExtensionRunner,
     MultiExtensionRunner = DefaultMultiExtensionRunner,
     getValidatedManifest = defaultGetValidatedManifest,
   }: CmdRunOptions = {}): Promise<DefaultMultiExtensionRunner> {
@@ -91,34 +109,86 @@ export default async function run(
     return { sourceDir, manifestData };
   }));
 
-  const firefoxDesktopRunnerParams = {
+  const runners = [];
+
+  const commonRunnerParams = {
     // Common options.
     extensions: extensions,
     keepProfileChanges,
     keepProfileChangesCompletely,
     allowRemote,
     startUrl,
+    args,
     desktopNotifications,
-
-    // Firefox specific CLI options.
-    firefoxBinary: firefox,
-    profilePath: firefoxProfile,
-    customPrefs,
-    browserConsole,
-    preInstall,
-
-    // Firefox runner injected dependencies.
-    firefoxApp,
-    firefoxClient,
   };
 
-  const firefoxDesktopRunner = new FirefoxDesktopExtensionRunner(
-    firefoxDesktopRunnerParams
-  );
+  if (!target || target.length === 0 || target.includes('firefox-desktop')) {
+    const firefoxDesktopRunnerParams = {
+      ...commonRunnerParams,
+
+      // Firefox specific CLI options.
+      firefoxBinary: firefox,
+      profilePath: firefoxProfile,
+      customPrefs,
+      browserConsole,
+      preInstall,
+
+      // Firefox runner injected dependencies.
+      firefoxApp,
+      firefoxClient,
+    };
+
+    const firefoxDesktopRunner = await createExtensionRunner({
+      target: 'firefox-desktop',
+      params: firefoxDesktopRunnerParams,
+    });
+    runners.push(firefoxDesktopRunner);
+  }
+
+  if (target && target.includes('firefox-android')) {
+    const firefoxAndroidRunnerParams = {
+      ...commonRunnerParams,
+
+      // Firefox specific CLI options.
+      profilePath: firefoxProfile,
+      customPrefs,
+      browserConsole,
+      preInstall,
+      firefoxApk,
+      adbDevice,
+      adbHost,
+      adbPort,
+      adbBin,
+
+      // Injected dependencies.
+      firefoxApp,
+      firefoxClient,
+      desktopNotifications: defaultDesktopNotifications,
+      buildSourceDir: (extensionSourceDir: string, tmpArtifactsDir: string) => {
+        return buildExtension({
+          sourceDir: extensionSourceDir,
+          ignoreFiles,
+          asNeeded: false,
+          // Use a separate temporary directory for building the extension zip file
+          // that we are going to upload on the android device.
+          artifactsDir: tmpArtifactsDir,
+        }, {
+          // Suppress the message usually logged by web-ext build.
+          showReadyMessage: false,
+        });
+      },
+    };
+
+    const firefoxAndroidRunner = await createExtensionRunner({
+      target: 'firefox-android',
+      params: firefoxAndroidRunnerParams,
+    });
+    runners.push(firefoxAndroidRunner);
+  }
 
   const extensionRunner = new MultiExtensionRunner({
-    runners: [firefoxDesktopRunner],
     desktopNotifications,
+    runners,
   });
 
   await extensionRunner.run();

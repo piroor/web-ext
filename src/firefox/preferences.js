@@ -64,6 +64,11 @@ const prefsCommon: FirefoxPreferences = {
 const prefsFennec: FirefoxPreferences = {
   'browser.console.showInPanel': true,
   'browser.firstrun.show.uidiscovery': false,
+  // browser.link.open_newwindow is changed from 3 to 2 in:
+  // https://github.com/saadtazi/firefox-profile-js/blob/cafc793d940a779d280103ae17d02a92de862efc/lib/firefox_profile.js#L32
+  // Restore original value to avoid https://github.com/mozilla/web-ext/issues/1592
+  'browser.link.open_newwindow': 3,
+  'devtools.remote.usb.enabled': true,
 };
 
 // Prefs specific to Firefox for desktop.
@@ -93,6 +98,11 @@ const prefsFirefox: FirefoxPreferences = {
   'browser.selfsupport.url': 'https://localhost/selfrepair',
   // Disable Reader Mode UI tour
   'browser.reader.detectedFirstArticle': true,
+
+  // Set the policy firstURL to an empty string to prevent
+  // the privacy info page to be opened on every "web-ext run".
+  // (See #1114 for rationale)
+  'datareporting.policy.firstRunURL': '',
 };
 
 const prefs = {
@@ -134,14 +144,9 @@ export function getPrefs(
 }
 
 export function coerceCLICustomPreference(
-  cliPrefs: string | Array<string>
+  cliPrefs: Array<string>
 ): FirefoxPreferences {
   const customPrefs = {};
-
-  if (!Array.isArray(cliPrefs)) {
-    cliPrefs = [cliPrefs];
-  }
-
 
   for (const pref of cliPrefs) {
     const prefsAry = pref.split('=');

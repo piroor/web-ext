@@ -4,6 +4,7 @@ import {createWriteStream} from 'fs';
 
 import {fs} from 'mz';
 import parseJSON from 'parse-json';
+import stripJsonComments from 'strip-json-comments';
 import defaultEventToPromise from 'event-to-promise';
 
 import defaultSourceWatcher from '../watcher';
@@ -25,7 +26,7 @@ const log = createLogger(__filename);
 
 
 export function safeFileName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9\.-]+/g, '_');
+  return name.toLowerCase().replace(/[^a-z0-9.-]+/g, '_');
 }
 
 
@@ -71,20 +72,21 @@ export async function getDefaultLocalizedName(
   let extensionName: string = manifestData.name;
 
   try {
-    messageContents = await fs.readFile(messageFile);
+    messageContents = await fs.readFile(messageFile, {encoding: 'utf-8'});
   } catch (error) {
     throw new UsageError(
       `Error reading messages.json file at ${messageFile}: ${error}`);
   }
 
   try {
-    messageData = parseJSON(messageContents, messageFile);
+    messageData = parseJSON(stripJsonComments(messageContents), messageFile);
   } catch (error) {
     throw new UsageError(
       `Error parsing messages.json ${error}`);
   }
 
-  extensionName = manifestData.name.replace(/__MSG_([A-Za-z0-9@_]+?)__/g,
+  extensionName = manifestData.name.replace(
+    /__MSG_([A-Za-z0-9@_]+?)__/g,
     (match, messageName) => {
       if (!(messageData[messageName]
             && messageData[messageName].message)) {
@@ -130,11 +132,14 @@ export async function defaultPackageCreator(
   let extensionName: string = manifestData.name;
 
   if (manifestData.default_locale) {
-    const messageFile = path.join(sourceDir, '_locales',
-      manifestData.default_locale, 'messages.json');
+    const messageFile = path.join(
+      sourceDir, '_locales',
+      manifestData.default_locale, 'messages.json'
+    );
     log.debug('Manifest declared default_locale, localizing extension name');
-    extensionName = await getDefaultLocalizedName(
-      {messageFile, manifestData});
+    extensionName = await getDefaultLocalizedName({
+      messageFile, manifestData,
+    });
   }
   const packageName = safeFileName(
     `${extensionName}-${manifestData.version}.zip`);
@@ -175,7 +180,6 @@ export type BuildCmdParams = {|
   sourceDir: string,
   artifactsDir: string,
   asNeeded?: boolean,
-  noInput?: boolean,
   overwriteDest?: boolean,
   ignoreFiles?: Array<string>,
 |};
@@ -197,7 +201,6 @@ export default async function build(
     asNeeded = false,
     overwriteDest = false,
     ignoreFiles = [],
-    noInput = false,
   }: BuildCmdParams,
   {
     manifestData,

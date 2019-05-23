@@ -1,11 +1,18 @@
 /* @flow */
+import {promisify} from 'util';
+
 import tmp from 'tmp';
-import promisify from 'es6-promisify';
 
 import {createLogger} from './logger';
+import {multiArgsPromisedFn} from './promisify';
 
 const log = createLogger(__filename);
 
+export type MakePromiseCallback = (tmpDir: TempDir) => any;
+
+tmp.dir[promisify.custom] = multiArgsPromisedFn(tmp.dir);
+
+const createTempDir = promisify(tmp.dir);
 
 /*
  * Work with a self-destructing temporary directory in a promise chain.
@@ -22,7 +29,7 @@ const log = createLogger(__filename);
  * );
  *
  */
-export function withTempDir(makePromise: Function): Promise<any> {
+export function withTempDir(makePromise: MakePromiseCallback): Promise<any> {
   const tmpDir = new TempDir();
   return tmpDir.create()
     .then(() => {
@@ -31,7 +38,6 @@ export function withTempDir(makePromise: Function): Promise<any> {
     .catch(tmpDir.errorHandler())
     .then(tmpDir.successHandler());
 }
-
 
 /*
  * Work with a self-destructing temporary directory object.
@@ -62,17 +68,20 @@ export class TempDir {
    * been created.
    */
   create(): Promise<TempDir> {
-    const createTempDir = promisify(tmp.dir, {multiArgs: true});
     return createTempDir(
       {
         prefix: 'tmp-web-ext-',
         // This allows us to remove a non-empty tmp dir.
         unsafeCleanup: true,
       })
-      .then((args) => {
-        const [tmpPath, removeTempDir] = args;
+      .then(([tmpPath, removeTempDir]) => {
         this._path = tmpPath;
-        this._removeTempDir = removeTempDir;
+        this._removeTempDir = () => new Promise((resolve, reject) => {
+          // `removeTempDir` parameter is a `next` callback which
+          // is called once the dir has been removed.
+          const next = (err) => err ? reject(err) : resolve();
+          removeTempDir(next);
+        });
         log.debug(`Created temporary directory: ${this.path()}`);
         return this;
       });
@@ -96,8 +105,8 @@ export class TempDir {
    * Promise().catch(tmp.errorHandler())
    */
   errorHandler(): Function {
-    return (error) => {
-      this.remove();
+    return async (error) => {
+      await this.remove();
       throw error;
     };
   }
@@ -109,8 +118,8 @@ export class TempDir {
    * Promise().then(tmp.successHandler())
    */
   successHandler(): Function {
-    return (promiseResult) => {
-      this.remove();
+    return async (promiseResult) => {
+      await this.remove();
       return promiseResult;
     };
   }
@@ -123,7 +132,7 @@ export class TempDir {
       return;
     }
     log.debug(`Removing temporary directory: ${this.path()}`);
-    this._removeTempDir && this._removeTempDir();
+    return this._removeTempDir && this._removeTempDir();
   }
 
 }

@@ -3,6 +3,7 @@ import path from 'path';
 
 import {fs} from 'mz';
 import parseJSON from 'parse-json';
+import stripJsonComments from 'strip-json-comments';
 
 import {InvalidManifest} from '../errors';
 import {createLogger} from './logger';
@@ -37,7 +38,7 @@ export default async function getValidatedManifest(
   let manifestContents;
 
   try {
-    manifestContents = await fs.readFile(manifestFile);
+    manifestContents = await fs.readFile(manifestFile, {encoding: 'utf-8'});
   } catch (error) {
     throw new InvalidManifest(
       `Could not read manifest.json file at ${manifestFile}: ${error}`);
@@ -46,7 +47,7 @@ export default async function getValidatedManifest(
   let manifestData;
 
   try {
-    manifestData = parseJSON(manifestContents, manifestFile);
+    manifestData = parseJSON(stripJsonComments(manifestContents), manifestFile);
   } catch (error) {
     throw new InvalidManifest(
       `Error parsing manifest.json at ${manifestFile}: ${error}`);

@@ -1,4 +1,5 @@
 /* @flow */
+import os from 'os';
 import path from 'path';
 import {readFileSync} from 'fs';
 
@@ -11,6 +12,11 @@ import {UsageError} from './errors';
 import {createLogger, consoleStream as defaultLogStream} from './util/logger';
 import {coerceCLICustomPreference} from './firefox/preferences';
 import {checkForUpdates as defaultUpdateChecker} from './util/updates';
+import {
+  discoverConfigFiles as defaultConfigDiscovery,
+  loadJSConfigFile as defaultLoadJSConfigFile,
+  applyConfigToArgv as defaultApplyConfigToArgv,
+} from './config';
 
 const log = createLogger(__filename);
 const envPrefix = 'WEB_EXT';
@@ -20,13 +26,18 @@ type ProgramOptions = {|
   absolutePackageDir?: string,
 |}
 
+export type VersionGetterFn = (absolutePackageDir: string) => string;
+
 // TODO: add pipes to Flow type after https://github.com/facebook/flow/issues/2405 is fixed
 
 type ExecuteOptions = {
   checkForUpdates?: Function,
   systemProcess?: typeof process,
   logStream?: typeof defaultLogStream,
-  getVersion?: Function,
+  getVersion?: VersionGetterFn,
+  applyConfigToArgv?: typeof defaultApplyConfigToArgv,
+  discoverConfigFiles?: typeof defaultConfigDiscovery,
+  loadJSConfigFile?: typeof defaultLoadJSConfigFile,
   shouldExitProgram?: boolean,
   globalEnv?: string,
 }
@@ -36,9 +47,11 @@ type ExecuteOptions = {
  * The command line program.
  */
 export class Program {
+  absolutePackageDir: string;
   yargs: any;
   commands: { [key: string]: Function };
   shouldExitProgram: boolean;
+  verboseEnabled: boolean;
   options: Object;
 
   constructor(
@@ -54,12 +67,24 @@ export class Program {
     argv = argv || process.argv.slice(2);
 
     // NOTE: always initialize yargs explicitly with the package dir
-    // so that we are sure that it is going to load the 'boolean-negation: false'
-    // config (See web-ext#469 for rationale).
+    // to avoid side-effects due to yargs looking for its configuration
+    // section from a package.json file stored in an arbitrary directory
+    // (e.g. in tests yargs would end up loading yargs config from the
+    // mocha package.json). web-ext package.json doesn't contain any yargs
+    // section as it is deprecated and we configure yargs using
+    // yargs.parserConfiguration. See web-ext#469 for rationale.
     const yargsInstance = yargs(argv, absolutePackageDir);
 
+    this.absolutePackageDir = absolutePackageDir;
+    this.verboseEnabled = false;
     this.shouldExitProgram = true;
     this.yargs = yargsInstance;
+
+    // The following yargs configuration option is needed to fix #304.
+    this.yargs.parserConfiguration({
+      'boolean-negation': false,
+    });
+
     this.yargs.strict();
 
     this.commands = {};
@@ -100,37 +125,57 @@ export class Program {
     this.options = {...this.options, ...options};
     Object.keys(options).forEach((key) => {
       options[key].global = true;
-      if (options[key].demand === undefined) {
+      if (options[key].demandOption === undefined) {
         // By default, all options should be "demanded" otherwise
         // yargs.strict() will think they are missing when declared.
-        options[key].demand = true;
+        options[key].demandOption = true;
       }
     });
     this.yargs.options(options);
     return this;
   }
 
+  enableVerboseMode(
+    logStream: typeof defaultLogStream,
+    version: string
+  ): void {
+    if (this.verboseEnabled) {
+      return;
+    }
+
+    logStream.makeVerbose();
+    log.info('Version:', version);
+    this.verboseEnabled = true;
+  }
+
   async execute(
-    absolutePackageDir: string,
     {
-      checkForUpdates = defaultUpdateChecker, systemProcess = process,
-      logStream = defaultLogStream, getVersion = defaultVersionGetter,
-      shouldExitProgram = true, globalEnv = WEBEXT_BUILD_ENV,
+      checkForUpdates = defaultUpdateChecker,
+      systemProcess = process,
+      logStream = defaultLogStream,
+      getVersion = defaultVersionGetter,
+      applyConfigToArgv = defaultApplyConfigToArgv,
+      discoverConfigFiles = defaultConfigDiscovery,
+      loadJSConfigFile = defaultLoadJSConfigFile,
+      shouldExitProgram = true,
+      globalEnv = WEBEXT_BUILD_ENV,
     }: ExecuteOptions = {}
   ): Promise<void> {
-
     this.shouldExitProgram = shouldExitProgram;
     this.yargs.exitProcess(this.shouldExitProgram);
 
     const argv = this.yargs.argv;
+
     const cmd = argv._[0];
 
+    const version = getVersion(this.absolutePackageDir);
     const runCommand = this.commands[cmd];
 
     if (argv.verbose) {
-      logStream.makeVerbose();
-      log.info('Version:', getVersion(absolutePackageDir));
+      this.enableVerboseMode(logStream, version);
     }
+
+    let adjustedArgv = {...argv};
 
     try {
       if (cmd === undefined) {
@@ -140,15 +185,59 @@ export class Program {
         throw new UsageError(`Unknown command: ${cmd}`);
       }
       if (globalEnv === 'production') {
-        checkForUpdates ({
-          version: getVersion(absolutePackageDir),
-        });
+        checkForUpdates({version});
       }
 
-      await runCommand(argv, {shouldExitProgram});
+      const configFiles = [];
+
+      // Because of an issue with yargs special handling for '--no-' option prefix (See #306)
+      // we need to look explicitly for the options  --config-discovery and --no-config-discovery
+      // (See #1307).
+      if (argv.configDiscovery && !argv.noConfigDiscovery) {
+        log.debug(
+          'Discovering config files. ' +
+          'Set --no-config-discovery to disable');
+        const discoveredConfigs = await discoverConfigFiles();
+        configFiles.push(...discoveredConfigs);
+      } else {
+        log.debug('Not discovering config files');
+      }
+
+      if (argv.config) {
+        configFiles.push(path.resolve(argv.config));
+      }
+
+      if (configFiles.length) {
+        const niceFileList = configFiles
+          .map((f) => f.replace(process.cwd(), '.'))
+          .map((f) => f.replace(os.homedir(), '~'))
+          .join(', ');
+        log.info(
+          'Applying config file' +
+          `${configFiles.length !== 1 ? 's' : ''}: ` +
+          `${niceFileList}`);
+      }
+
+      configFiles.forEach((configFileName) => {
+        const configObject = loadJSConfigFile(configFileName);
+        adjustedArgv = applyConfigToArgv({
+          argv: adjustedArgv,
+          argvFromCLI: argv,
+          configFileName,
+          configObject,
+          options: this.options,
+        });
+      });
+
+      if (adjustedArgv.verbose) {
+        // Ensure that the verbose is enabled when specified in a config file.
+        this.enableVerboseMode(logStream, version);
+      }
+
+      await runCommand(adjustedArgv, {shouldExitProgram});
 
     } catch (error) {
-      if (!(error instanceof UsageError) || argv.verbose) {
+      if (!(error instanceof UsageError) || adjustedArgv.verbose) {
         log.error(`\n${error.stack}\n`);
       } else {
         log.error(`\n${error}\n`);
@@ -194,7 +283,7 @@ export function defaultVersionGetter(
 // TODO: add pipes to Flow type after https://github.com/facebook/flow/issues/2405 is fixed
 
 type MainParams = {
-  getVersion?: Function,
+  getVersion?: VersionGetterFn,
   commands?: Object,
   argv: Array<any>,
   runOptions?: Object,
@@ -207,8 +296,8 @@ export function main(
     runOptions = {},
   }: MainParams = {}
 ): Promise<any> {
-
   const program = new Program(argv, {absolutePackageDir});
+  const version = getVersion(absolutePackageDir);
 
   // yargs uses magic camel case expansion to expose options on the
   // final argv object. For example, the 'artifacts-dir' option is alternatively
@@ -226,7 +315,7 @@ Example: $0 --help run.
     .help('help')
     .alias('h', 'help')
     .env(envPrefix)
-    .version(() => getVersion(absolutePackageDir))
+    .version(version)
     .demandCommand(1, 'You must specify a command')
     .strict();
 
@@ -251,18 +340,36 @@ Example: $0 --help run.
       alias: 'v',
       describe: 'Show verbose output',
       type: 'boolean',
+      demandOption: false,
     },
     'ignore-files': {
       alias: 'i',
       describe: 'A list of glob patterns to define which files should be ' +
                 'ignored. (Example: --ignore-files=path/to/first.js ' +
                 'path/to/second.js "**/*.log")',
-      demand: false,
+      demandOption: false,
       requiresArg: true,
       type: 'array',
     },
     'no-input': {
       describe: 'Disable all features that require standard input',
+      type: 'boolean',
+      demandOption: false,
+    },
+    'config': {
+      alias: 'c',
+      describe: 'Path to a CommonJS config file to set ' +
+        'option defaults',
+      default: undefined,
+      demandOption: false,
+      requiresArg: true,
+      type: 'string',
+    },
+    'config-discovery': {
+      describe: 'Discover config files in home directory and ' +
+        'working directory. Disable with --no-config-discovery.',
+      demandOption: false,
+      default: true,
       type: 'boolean',
     },
   });
@@ -288,40 +395,54 @@ Example: $0 --help run.
       commands.sign, {
         'api-key': {
           describe: 'API key (JWT issuer) from addons.mozilla.org',
-          demand: true,
+          demandOption: true,
           type: 'string',
         },
         'api-secret': {
           describe: 'API secret (JWT secret) from addons.mozilla.org',
-          demand: true,
+          demandOption: true,
           type: 'string',
         },
         'api-url-prefix': {
           describe: 'Signing API URL prefix',
           default: 'https://addons.mozilla.org/api/v3',
-          demand: true,
+          demandOption: true,
           type: 'string',
         },
         'api-proxy': {
           describe:
             'Use a proxy to access the signing API. ' +
             'Example: https://yourproxy:6000 ',
-          demand: false,
+          demandOption: false,
           type: 'string',
         },
         'id': {
           describe:
             'A custom ID for the extension. This has no effect if the ' +
             'extension already declares an explicit ID in its manifest.',
-          demand: false,
+          demandOption: false,
           type: 'string',
         },
         'timeout': {
           describe: 'Number of milliseconds to wait before giving up',
           type: 'number',
         },
+        'channel': {
+          describe: 'The channel for which to sign the addon. Either ' +
+          '\'listed\' or \'unlisted\'',
+          type: 'string',
+        },
       })
     .command('run', 'Run the extension', commands.run, {
+      'target': {
+        alias: 't',
+        describe: 'The extensions runners to enable (e.g. firefox-desktop, ' +
+                  'firefox-android). Specify this option multiple times to ' +
+                  'run against multiple targets.',
+        default: 'firefox-desktop',
+        demandOption: false,
+        type: 'array',
+      },
       'firefox': {
         alias: ['f', 'firefox-binary'],
         describe: 'Path or alias to a Firefox executable such as firefox-bin ' +
@@ -329,7 +450,7 @@ Example: $0 --help run.
                   'If not specified, the default Firefox will be used. ' +
                   'You can specify the following aliases in lieu of a path: ' +
                   'firefox, beta, nightly, firefoxdeveloperedition.',
-        demand: false,
+        demandOption: false,
         type: 'string',
       },
       'firefox-profile': {
@@ -338,13 +459,13 @@ Example: $0 --help run.
                   'can be specified as a directory or a name, such as one ' +
                   'you would see in the Profile Manager. If not specified, ' +
                   'a new temporary profile will be created.',
-        demand: false,
+        demandOption: false,
         type: 'string',
       },
       'keep-profile-changes': {
         describe: 'Run Firefox directly in custom profile. Any changes to ' +
                   'the profile will be saved.',
-        demand: false,
+        demandOption: false,
         type: 'boolean',
       },
       'keep-profile-changes-completely': {
@@ -360,14 +481,14 @@ Example: $0 --help run.
       },
       'no-reload': {
         describe: 'Do not reload the extension when source files change',
-        demand: false,
+        demandOption: false,
         type: 'boolean',
       },
       'pre-install': {
         describe: 'Pre-install the extension into the profile before ' +
                   'startup. This is only needed to support older versions ' +
                   'of Firefox.',
-        demand: false,
+        demandOption: false,
         type: 'boolean',
       },
       'pref': {
@@ -375,23 +496,64 @@ Example: $0 --help run.
                   '(example: --pref=general.useragent.locale=fr-FR). ' +
                   'You can repeat this option to set more than one ' +
                   'preference.',
-        demand: false,
+        demandOption: false,
         requiresArg: true,
-        type: 'string',
+        type: 'array',
         coerce: coerceCLICustomPreference,
       },
       'start-url': {
         alias: ['u', 'url'],
         describe: 'Launch firefox at specified page',
-        demand: false,
+        demandOption: false,
         requiresArg: true,
-        type: 'string',
+        type: 'array',
       },
       'browser-console': {
         alias: ['bc'],
         describe: 'Open the DevTools Browser Console.',
-        demand: false,
+        demandOption: false,
         type: 'boolean',
+      },
+      'args': {
+        alias: ['arg'],
+        describe: 'Additional CLI options passed to the Browser binary',
+        demandOption: false,
+        type: 'array',
+      },
+      // Firefox for Android CLI options.
+      'adb-bin': {
+        describe: 'Specify a custom path to the adb binary',
+        demandOption: false,
+        type: 'string',
+        requiresArg: true,
+      },
+      'adb-host': {
+        describe: 'Connect to adb on the specified host',
+        demandOption: false,
+        type: 'string',
+        requiresArg: true,
+      },
+      'adb-port': {
+        describe: 'Connect to adb on the specified port',
+        demandOption: false,
+        type: 'string',
+        requiresArg: true,
+      },
+      'adb-device': {
+        alias: ['android-device'],
+        describe: 'Connect to the specified adb device name',
+        demandOption: false,
+        type: 'string',
+        requiresArg: true,
+      },
+      'firefox-apk': {
+        describe: (
+          'Run a specific Firefox for Android APK. ' +
+          'Example: org.mozilla.fennec_aurora'
+        ),
+        demandOption: false,
+        type: 'string',
+        requiresArg: true,
       },
     })
     .command('lint', 'Validate the extension source', commands.lint, {
@@ -432,7 +594,7 @@ Example: $0 --help run.
       },
     })
     .command('docs', 'Open the web-ext documentation in a browser',
-      commands.docs, {});
+             commands.docs, {});
 
-  return program.execute(absolutePackageDir, runOptions);
+  return program.execute({getVersion, ...runOptions});
 }

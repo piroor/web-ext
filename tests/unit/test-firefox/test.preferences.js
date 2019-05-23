@@ -18,6 +18,9 @@ describe('firefox/preferences', () => {
       assert.equal(prefs['devtools.debugger.remote-enabled'], true);
       // This is a Firefox only pref.
       assert.equal(prefs['devtools.chrome.enabled'], true);
+      // This is a Firefox only pref that we set to prevent Firefox
+      // to open the privacy policy info page on every "web-ext run".
+      assert.equal(prefs['datareporting.policy.firstRunURL'], '');
     });
 
     it('gets Fennec prefs with some defaults', () => {
@@ -39,7 +42,7 @@ describe('firefox/preferences', () => {
   describe('coerceCLICustomPreference', () => {
 
     it('converts a single --pref cli option from string to object', () => {
-      const prefs = coerceCLICustomPreference('valid.preference=true');
+      const prefs = coerceCLICustomPreference(['valid.preference=true']);
       assert.isObject(prefs);
       assert.equal(prefs['valid.preference'], true);
     });
@@ -54,23 +57,23 @@ describe('firefox/preferences', () => {
     });
 
     it('converts boolean values', () => {
-      const prefs = coerceCLICustomPreference('valid.preference=true');
+      const prefs = coerceCLICustomPreference(['valid.preference=true']);
       assert.equal(prefs['valid.preference'], true);
     });
 
     it('converts number values', () => {
-      const prefs = coerceCLICustomPreference('valid.preference=455');
+      const prefs = coerceCLICustomPreference(['valid.preference=455']);
       assert.equal(prefs['valid.preference'], 455);
     });
 
     it('converts float values', () => {
-      const prefs = coerceCLICustomPreference('valid.preference=4.55');
+      const prefs = coerceCLICustomPreference(['valid.preference=4.55']);
       assert.equal(prefs['valid.preference'], '4.55');
     });
 
     it('supports string values with "=" chars', () => {
       const prefs = coerceCLICustomPreference(
-        'valid.preference=value=withequals=chars'
+        ['valid.preference=value=withequals=chars']
       );
       assert.equal(prefs['valid.preference'], 'value=withequals=chars');
     });
@@ -87,15 +90,15 @@ describe('firefox/preferences', () => {
 
     it('throws an error for invalid or incomplete preferences', () => {
       assert.throws(
-        () => coerceCLICustomPreference('test.invalid.prop'),
+        () => coerceCLICustomPreference(['test.invalid.prop']),
         UsageError,
-        'UsageError: Incomplete custom preference: "test.invalid.prop". ' +
+        'Incomplete custom preference: "test.invalid.prop". ' +
         'Syntax expected: "prefname=prefvalue".'
       );
 
-      assert.throws(() => coerceCLICustomPreference('*&%£=true'),
+      assert.throws(() => coerceCLICustomPreference(['*&%£=true']),
                     UsageError,
-                    'UsageError: Invalid custom preference name: *&%£');
+                    'Invalid custom preference name: *&%£');
     });
 
   });

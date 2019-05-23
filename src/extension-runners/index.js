@@ -1,37 +1,62 @@
 /* @flow */
 
 import readline from 'readline';
-import tty from 'tty';
 
 import type Watchpack from 'watchpack';
 
 import type {
-  IExtensionRunner,  // eslint-disable-line import/named
+  IExtensionRunner, // eslint-disable-line import/named
   ExtensionRunnerReloadResult,
 } from './base';
+import {WebExtError} from '../errors';
 import {
   showDesktopNotification as defaultDesktopNotifications,
 } from '../util/desktop-notifier';
+import type {FirefoxAndroidExtensionRunnerParams} from './firefox-android';
+import type {FirefoxDesktopExtensionRunnerParams} from './firefox-desktop';
 import {createLogger} from '../util/logger';
 import type {FileFilterCreatorFn} from '../util/file-filter';
 import {
   createFileFilter as defaultFileFilterCreator,
 } from '../util/file-filter';
+import {
+  isTTY, setRawMode,
+} from '../util/stdin';
 import defaultSourceWatcher from '../watcher';
 import type {OnSourceChangeFn} from '../watcher';
 
 
 const log = createLogger(__filename);
 
+export type ExtensionRunnerConfig = {|
+  target: 'firefox-desktop',
+  params: FirefoxDesktopExtensionRunnerParams,
+|} | {|
+  target: 'firefox-android',
+  params: FirefoxAndroidExtensionRunnerParams,
+|};
 
 export type MultiExtensionRunnerParams = {|
   runners: Array<IExtensionRunner>,
   desktopNotifications: typeof defaultDesktopNotifications,
 |};
 
-// Export everything exported by the firefox-desktop runner.
-export * from './firefox-desktop';
-
+export async function createExtensionRunner(config: ExtensionRunnerConfig) {
+  switch (config.target) {
+    case 'firefox-desktop': {
+      // TODO: use async import instead of require - https://github.com/mozilla/web-ext/issues/1306
+      const {FirefoxDesktopExtensionRunner} = require('./firefox-desktop');
+      return new FirefoxDesktopExtensionRunner(config.params);
+    }
+    case 'firefox-android': {
+      // TODO: use async import instead of require - https://github.com/mozilla/web-ext/issues/1306
+      const {FirefoxAndroidExtensionRunner} = require('./firefox-android');
+      return new FirefoxAndroidExtensionRunner(config.params);
+    }
+    default:
+      throw new WebExtError(`Unknown target: "${config.target}"`);
+  }
+}
 
 /**
  * Implements an IExtensionRunner which allow the caller to
@@ -134,6 +159,7 @@ export class MultiExtensionRunner {
       promises.push(reloadPromise);
     }
 
+    // $FLOW_FIXME: When upgrading to Flow 0.61.0, it could not follow the type of sourceDir in the array of promises.
     return await Promise.all(promises).then((results) => {
       this.handleReloadResults(results);
       return results;
@@ -216,7 +242,7 @@ export function defaultWatcherCreator(
     onSourceChange = defaultSourceWatcher,
     createFileFilter = defaultFileFilterCreator,
   }: WatcherCreatorParams
- ): Watchpack {
+): Watchpack {
   const fileFilter = createFileFilter(
     {sourceDir, artifactsDir, ignoreFiles}
   );
@@ -280,9 +306,9 @@ export function defaultReloadStrategy(
     }
   });
 
-  if (allowInput && stdin.isTTY && stdin instanceof tty.ReadStream) {
+  if (allowInput && isTTY(stdin)) {
     readline.emitKeypressEvents(stdin);
-    stdin.setRawMode(true);
+    setRawMode(stdin, true);
 
     const keypressUsageInfo = 'Press R to reload (and Ctrl-C to quit)';
 
@@ -306,9 +332,7 @@ export function defaultReloadStrategy(
 
           // NOTE: Switch the raw mode off before suspending (needed to make the keypress event
           // to work correctly when the nodejs process is resumed).
-          if (stdin instanceof tty.ReadStream) {
-            stdin.setRawMode(false);
-          }
+          setRawMode(stdin, false);
 
           log.info('\nweb-ext has been suspended on user request');
           kill(process.pid, 'SIGTSTP');
@@ -316,10 +340,9 @@ export function defaultReloadStrategy(
           // Prepare to resume.
 
           log.info(`\nweb-ext has been resumed. ${keypressUsageInfo}`);
+
           // Switch the raw mode on on resume.
-          if (stdin instanceof tty.ReadStream) {
-            stdin.setRawMode(true);
-          }
+          setRawMode(stdin, true);
         } else if (keyPressed.name === 'r') {
           log.debug('Reloading installed extensions on user request');
           extensionRunner.reloadAllExtensions();

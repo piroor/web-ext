@@ -1,11 +1,14 @@
 /* @flow */
 import path from 'path';
 import EventEmitter from 'events';
+import tty from 'tty';
+import stream from 'stream';
+import {promisify} from 'util';
 
+import deepcopy from 'deepcopy';
 import sinon from 'sinon';
 import yauzl from 'yauzl';
 import ExtendableError from 'es6-error';
-import promisify from 'es6-promisify';
 
 import {createLogger} from '../../src/util/logger';
 import * as defaultFirefoxApp from '../../src/firefox';
@@ -110,9 +113,8 @@ export function fixturePath(...pathParts: Array<string>): string {
  *
  * Usage:
  *
- *  Promise.resolve()
- *    .then(makeSureItFails())
- *    .catch((error) => {
+ *  Promise.reject(new Error('some error'))
+ *    .then(makeSureItFails(), (error) => {
  *      // Safely make assertions about the error...
  *    });
  */
@@ -151,7 +153,8 @@ export function makeSureItFails(): Function {
  * assert.equal(fakeProcess.exit.called, true);
  *
  */
- // $FLOW_IGNORE: fake can return any kind of object and fake a defined set of methods for testing.
+
+// $FLOW_IGNORE: fake can return any kind of object and fake a defined set of methods for testing.
 export function fake<T>(
   original: Object, methods: Object = {}, skipProperties: Array<string> = []
 ): T {
@@ -193,6 +196,7 @@ export function fake<T>(
     stub[key] = sinon.spy(stub[key]);
   });
 
+  // $FLOW_IGNORE: fake can return any kind of object for testing.
   return stub;
 }
 
@@ -220,7 +224,7 @@ type FakeFirefoxClientParams = {|
 export function fakeFirefoxClient({
   requestResult = {}, requestError,
   makeRequestResult = {}, makeRequestError,
-}: FakeFirefoxClientParams= {}) {
+}: FakeFirefoxClientParams = {}) {
   return {
     disconnect: sinon.spy(() => {}),
     request: sinon.spy(
@@ -271,13 +275,13 @@ export class TCPConnectError extends ExtendableError {
 export class ErrorWithCode extends Error {
   code: string;
   constructor(code: ?string, message: ?string) {
-    super(message || 'pretend this is a system error');
+    super(`${code || ''}: ${message || 'pretend this is a system error'}`);
     this.code = code || 'SOME_CODE';
   }
 }
 
 /*
- * A basic manifest fixture using in unit tests.
+ * A basic manifest fixture used in unit tests.
  */
 export const basicManifest = {
   name: 'the extension',
@@ -288,6 +292,12 @@ export const basicManifest = {
     },
   },
 };
+
+/*
+ * A basic manifest fixture without an applications property.
+ */
+export const manifestWithoutApps = deepcopy(basicManifest);
+delete manifestWithoutApps.applications;
 
 /*
  * A class that implements an empty IExtensionRunner interface.
@@ -333,4 +343,19 @@ export function getFakeFirefox(
 
 export function getFakeRemoteFirefox(implementations: Object = {}) {
   return fake(RemoteFirefox.prototype, implementations);
+}
+
+class FakeStdin extends stream.Readable {
+  get isTTY() {
+    return true;
+  }
+
+  // Fake tty.ReadStream methods.
+  setRawMode() {}
+  _read() {}
+}
+
+export function createFakeStdin(): tty.ReadStream {
+  // $FLOW_IGNORE: flow complains that the return value is incompatible with tty.ReadStream
+  return new FakeStdin();
 }

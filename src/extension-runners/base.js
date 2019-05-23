@@ -18,6 +18,7 @@ export type ExtensionRunnerParams = {|
   keepProfileChangesCompletely: boolean,
   allowRemote: boolean,
   startUrl: ?string | ?Array<string>,
+  args?: Array<string>,
 
   // Common injected dependencies.
   desktopNotifications: typeof defaultDesktopNotifications,

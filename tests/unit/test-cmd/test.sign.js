@@ -1,23 +1,23 @@
 /* @flow */
 import path from 'path';
+import {promisify} from 'util';
 
 import copyDir from 'copy-dir';
 import {fs} from 'mz';
 import {describe, it} from 'mocha';
 import {assert} from 'chai';
 import sinon from 'sinon';
-import promisify from 'es6-promisify';
 
 import {onlyInstancesOf, UsageError, WebExtError} from '../../../src/errors';
 import {getManifestId} from '../../../src/util/manifest';
 import {withTempDir} from '../../../src/util/temp-dir';
-import {manifestWithoutApps} from '../test-util/test.manifest';
 import completeSignCommand, {
   extensionIdFile, getIdFromSourceDir, saveIdToSourceDir,
 } from '../../../src/cmd/sign';
 import {
   basicManifest,
   makeSureItFails,
+  manifestWithoutApps,
   fixturePath,
 } from '../helpers';
 // Import flow type
@@ -103,17 +103,19 @@ describe('sign', () => {
   it('allows an empty application ID when signing', () => withTempDir(
     (tmpDir) => {
       const stubs = getStubs();
-      return sign(tmpDir, stubs,
+      return sign(
+        tmpDir, stubs,
         {
           extraOptions: {
             preValidatedManifest: manifestWithoutApps,
           },
         })
         .then(() => {
-          assert.equal(stubs.signAddon.called, true);
-          assert.strictEqual(
-            stubs.signAddon.firstCall.args[0].id,
-            getManifestId(manifestWithoutApps));
+          sinon.assert.called(stubs.signAddon);
+          sinon.assert.calledWithMatch(
+            stubs.signAddon,
+            {id: getManifestId(manifestWithoutApps)}
+          );
         });
     }
   ));
@@ -122,7 +124,8 @@ describe('sign', () => {
     (tmpDir) => {
       const customId = 'some-custom-id';
       const stubs = getStubs();
-      return sign(tmpDir, stubs,
+      return sign(
+        tmpDir, stubs,
         {
           extraArgs: {
             id: customId,
@@ -132,9 +135,8 @@ describe('sign', () => {
           },
         })
         .then(() => {
-          assert.equal(stubs.signAddon.called, true);
-          assert.equal(stubs.signAddon.firstCall.args[0].id,
-                       customId);
+          sinon.assert.called(stubs.signAddon);
+          sinon.assert.calledWithMatch(stubs.signAddon, {id: customId});
         });
     }
   ));
@@ -158,9 +160,8 @@ describe('sign', () => {
           },
         }))
         .then(() => {
-          assert.equal(stubs.signAddon.called, true);
-          assert.equal(stubs.signAddon.firstCall.args[0].id,
-                       customId);
+          sinon.assert.called(stubs.signAddon);
+          sinon.assert.calledWithMatch(stubs.signAddon, {id: customId});
         });
     }
   ));
@@ -169,7 +170,8 @@ describe('sign', () => {
     (tmpDir) => {
       const customId = 'some-custom-id';
       const stubs = getStubs();
-      return sign(tmpDir, stubs,
+      return sign(
+        tmpDir, stubs,
         {
           extraArgs: {
             id: customId,
@@ -198,7 +200,8 @@ describe('sign', () => {
           id: 'auto-generated-id',
         }));
 
-        return sign(tmpDir,
+        return sign(
+          tmpDir,
           {
             ...stubs,
             signAddon,
@@ -217,21 +220,19 @@ describe('sign', () => {
       // Run an initial sign command which will yield a server generated ID.
       return _sign()
         .then(({signAddon, signingResult}) => {
-          assert.equal(signAddon.called, true);
-          assert.strictEqual(signAddon.firstCall.args[0].id,
-                             undefined);
+          sinon.assert.called(signAddon);
+          sinon.assert.calledWithMatch(signAddon, {id: undefined});
           assert.equal(signingResult.id, 'auto-generated-id');
 
           // Re-run the sign command again.
           return _sign();
         })
         .then(({signAddon}) => {
-          assert.equal(signAddon.called, true);
+          sinon.assert.called(signAddon);
           // This should call signAddon() with the server generated
           // ID that was saved to the source directory from the previous
           // signing result.
-          assert.equal(signAddon.firstCall.args[0].id,
-                       'auto-generated-id');
+          sinon.assert.calledWithMatch(signAddon, {id: 'auto-generated-id'});
         });
     }
   ));
@@ -258,8 +259,7 @@ describe('sign', () => {
         .then(makeSureItFails())
         .catch((error) => {
           assert.instanceOf(error, WebExtError);
-          assert.match(error.message,
-            /The WebExtension could not be signed/);
+          assert.match(error.message, /The extension could not be signed/);
         });
     }
   ));
@@ -268,30 +268,33 @@ describe('sign', () => {
     (tmpDir) => {
       const stubs = getStubs();
       const artifactsDir = path.join(tmpDir.path(), 'some-artifacts-dir');
+      const applications: ExtensionManifestApplications =
+        stubs.preValidatedManifest.applications || {gecko: {}};
       return sign(tmpDir, stubs, {extraArgs: {artifactsDir}})
         .then(() => {
-          assert.equal(stubs.signAddon.called, true);
-          const signedAddonCall = stubs.signAddon.firstCall.args[0];
-          assert.equal(signedAddonCall.apiKey,
-                       stubs.signingConfig.apiKey);
-          assert.equal(signedAddonCall.apiSecret,
-                       stubs.signingConfig.apiSecret);
-          assert.equal(signedAddonCall.apiUrlPrefix,
-                       stubs.signingConfig.apiUrlPrefix);
-          assert.equal(signedAddonCall.apiProxy,
-                       stubs.signingConfig.apiProxy);
-          assert.equal(signedAddonCall.timeout,
-                       stubs.signingConfig.timeout);
-          assert.equal(signedAddonCall.xpiPath,
-                       stubs.buildResult.extensionPath);
+          sinon.assert.called(stubs.signAddon);
+          sinon.assert.calledWithMatch(stubs.signAddon, {
+            apiKey: stubs.signingConfig.apiKey,
+            apiProxy: stubs.signingConfig.apiProxy,
+            apiSecret: stubs.signingConfig.apiSecret,
+            apiUrlPrefix: stubs.signingConfig.apiUrlPrefix,
+            downloadDir: artifactsDir,
+            id: applications.gecko.id,
+            timeout: stubs.signingConfig.timeout,
+            version: stubs.preValidatedManifest.version,
+            xpiPath: stubs.buildResult.extensionPath,
+          });
+        });
+    }
+  ));
 
-          const applications: ExtensionManifestApplications =
-            stubs.preValidatedManifest.applications || {gecko: {}};
-          assert.equal(signedAddonCall.id, applications.gecko.id);
-
-          assert.equal(signedAddonCall.version,
-                       stubs.preValidatedManifest.version);
-          assert.equal(signedAddonCall.downloadDir, artifactsDir);
+  it('passes the channel parameter to the signer', () => withTempDir(
+    (tmpDir) => {
+      const stubs = getStubs();
+      return sign(tmpDir, stubs, {extraArgs: {channel: 'unlisted'}})
+        .then(() => {
+          sinon.assert.called(stubs.signAddon);
+          sinon.assert.calledWithMatch(stubs.signAddon, {channel: 'unlisted'});
         });
     }
   ));
@@ -301,8 +304,8 @@ describe('sign', () => {
       const stubs = getStubs();
       return sign(tmpDir, stubs, {extraArgs: {verbose: true}})
         .then(() => {
-          assert.equal(stubs.signAddon.called, true);
-          assert.equal(stubs.signAddon.firstCall.args[0].verbose, true);
+          sinon.assert.called(stubs.signAddon);
+          sinon.assert.calledWithMatch(stubs.signAddon, {verbose: true});
         });
     }
   ));
@@ -313,8 +316,8 @@ describe('sign', () => {
       const ignoreFiles = ['*'];
       return sign(tmpDir, stubs, {extraArgs: {ignoreFiles}})
         .then(() => {
-          assert.equal(stubs.signAddon.called, true);
-          assert.equal(stubs.build.firstCall.args[0].ignoreFiles, ignoreFiles);
+          sinon.assert.called(stubs.signAddon);
+          sinon.assert.calledWithMatch(stubs.build, {ignoreFiles});
         });
     }
   ));
@@ -393,6 +396,17 @@ describe('sign', () => {
           });
       }
     ));
+
+    it('throws unexpected errors', async () => {
+      const fakeAsyncFsReadFile = sinon.spy(async () => {
+        throw new Error('Unexpected fs.readFile error');
+      });
+      await assert.isRejected(
+        getIdFromSourceDir('fakeSourceDir', fakeAsyncFsReadFile),
+        /Unexpected fs.readFile error/);
+
+      sinon.assert.calledOnce(fakeAsyncFsReadFile);
+    });
 
   });
 

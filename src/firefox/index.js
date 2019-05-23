@@ -1,12 +1,12 @@
 /* @flow */
 import nodeFs from 'fs';
 import path from 'path';
+import {promisify} from 'util';
 
 import {default as defaultFxRunner} from 'fx-runner';
 import FirefoxProfile, {copyFromUserProfile as defaultUserProfileCopier}
   from 'firefox-profile';
 import {fs} from 'mz';
-import promisify from 'es6-promisify';
 import eventToPromise from 'event-to-promise';
 
 import isDirectory from '../util/is-directory';
@@ -26,6 +26,8 @@ import type {ExtensionManifest} from '../util/manifest';
 
 
 const log = createLogger(__filename);
+
+const defaultAsyncFsStat = fs.stat.bind(fs);
 
 export const defaultFirefoxEnv = {
   XPCOM_DEBUG_BREAK: 'stack',
@@ -238,7 +240,7 @@ export async function isDefaultProfile(
 
   // Check for profile dir path.
   const finder = new ProfileFinder(baseProfileDir);
-  const readProfiles = promisify(finder.readProfiles, finder);
+  const readProfiles = promisify(finder.readProfiles.bind(finder));
 
   await readProfiles();
 
@@ -325,6 +327,39 @@ export function configureProfile(
   return Promise.resolve(profile);
 }
 
+export type getProfileFn = (profileName: string) => Promise<string | void>;
+
+export type CreateProfileFinderParams = {|
+  userDirectoryPath?: string,
+  FxProfile?: typeof FirefoxProfile
+|}
+
+export function defaultCreateProfileFinder(
+  {
+    userDirectoryPath,
+    FxProfile = FirefoxProfile,
+  }: CreateProfileFinderParams = {}
+): getProfileFn {
+  const finder = new FxProfile.Finder(userDirectoryPath);
+  const readProfiles = promisify(finder.readProfiles.bind(finder));
+  const getPath = promisify(finder.getPath.bind(finder));
+  return async (profileName: string): Promise<string | void> => {
+    try {
+      await readProfiles();
+      const hasProfileName = finder.profiles.filter(
+        (profileDef) => profileDef.Name === profileName).length !== 0;
+      if (hasProfileName) {
+        return await getPath(profileName);
+      }
+    } catch (error) {
+      if (!isErrorWithCode('ENOENT', error)) {
+        throw error;
+      }
+      log.warn('Unable to find Firefox profiles.ini');
+    }
+  };
+}
+
 // useProfile types and implementation.
 
 export type UseProfileParams = {
@@ -332,6 +367,7 @@ export type UseProfileParams = {
   configureThisProfile?: ConfigureProfileFn,
   isFirefoxDefaultProfile?: IsDefaultProfileFn,
   customPrefs?: FirefoxPreferences,
+  createProfileFinder?: typeof defaultCreateProfileFinder,
 };
 
 // Use the target path as a Firefox profile without cloning it
@@ -344,6 +380,7 @@ export async function useProfile(
     isFirefoxDefaultProfile = isDefaultProfile,
     customPrefs = {},
     noPrefInjection,
+    createProfileFinder = defaultCreateProfileFinder,
   }: UseProfileParams = {},
 ): Promise<FirefoxProfile> {
   const isForbiddenProfile = await isFirefoxDefaultProfile(profilePath);
@@ -355,7 +392,26 @@ export async function useProfile(
       '\nSee https://github.com/mozilla/web-ext/issues/1005'
     );
   }
-  const profile = new FirefoxProfile({destinationDirectory: profilePath});
+
+  let destinationDirectory;
+  const getProfilePath = createProfileFinder();
+
+  const profileIsDirPath = await isDirectory(profilePath);
+  if (profileIsDirPath) {
+    log.debug(`Using profile directory "${profilePath}"`);
+    destinationDirectory = profilePath;
+  } else {
+    log.debug(`Assuming ${profilePath} is a named profile`);
+    destinationDirectory = await getProfilePath(profilePath);
+    if (!destinationDirectory) {
+      throw new UsageError(
+        `The request "${profilePath}" profile name ` +
+        'cannot be resolved to a profile path'
+      );
+    }
+  }
+
+  const profile = new FirefoxProfile({destinationDirectory});
   return await configureThisProfile(profile, {app, customPrefs, noPrefInjection});
 }
 
@@ -447,6 +503,7 @@ export type InstallExtensionParams = {|
   manifestData: ExtensionManifest,
   profile: FirefoxProfile,
   extensionPath: string,
+  asyncFsStat?: typeof defaultAsyncFsStat,
 |};
 
 /*
@@ -466,6 +523,7 @@ export async function installExtension(
     manifestData,
     profile,
     extensionPath,
+    asyncFsStat = defaultAsyncFsStat,
   }: InstallExtensionParams): Promise<any> {
   // This more or less follows
   // https://github.com/saadtazi/firefox-profile-js/blob/master/lib/firefox_profile.js#L531
@@ -477,7 +535,7 @@ export async function installExtension(
   }
 
   try {
-    await fs.stat(profile.extensionsDir);
+    await asyncFsStat(profile.extensionsDir);
   } catch (error) {
     if (isErrorWithCode('ENOENT', error)) {
       log.debug(`Creating extensions directory: ${profile.extensionsDir}`);

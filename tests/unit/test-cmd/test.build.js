@@ -18,9 +18,9 @@ import {
   basicManifest,
   fixturePath,
   makeSureItFails,
+  manifestWithoutApps,
   ZipFile,
 } from '../helpers';
-import {manifestWithoutApps} from '../test-util/test.manifest';
 import {UsageError} from '../../../src/errors';
 import {createLogger} from '../../../src/util/logger';
 
@@ -91,12 +91,14 @@ describe('build', () => {
     return withTempDir(
       (tmpDir) => {
         const messageFileName = path.join(tmpDir.path(), 'messages.json');
-        fs.writeFileSync(messageFileName,
+        fs.writeFileSync(
+          messageFileName,
           `{"extensionName": {
               "message": "example extension",
               "description": "example description"
             }
-          }`);
+          }`
+        );
 
         const manifestWithRepeatingPattern = {
           name: '__MSG_extensionName__ __MSG_extensionName__',
@@ -114,12 +116,42 @@ describe('build', () => {
     );
   });
 
+  it('handles comments in messages.json', () => {
+    return withTempDir(
+      (tmpDir) => {
+        const messageFileName = path.join(tmpDir.path(), 'messages.json');
+        fs.writeFileSync(
+          messageFileName,
+          `{"extensionName": {
+              "message": "example extension", // comments
+              "description": "example with comments"
+            }
+          }`
+        );
+
+        return getDefaultLocalizedName({
+          messageFile: messageFileName,
+          manifestData: {
+            name: '__MSG_extensionName__',
+            version: '0.0.1',
+          },
+        })
+          .then((result) => {
+            assert.match(result, /example extension/);
+          });
+      }
+    );
+  });
+
   it('checks locale file for malformed json', () => {
     return withTempDir(
       (tmpDir) => {
         const messageFileName = path.join(tmpDir.path(), 'messages.json');
-        fs.writeFileSync(messageFileName,
-          '{"simulated:" "json syntax error"');
+        fs.writeFileSync(
+          messageFileName,
+          '{"simulated:" "json syntax error"'
+        );
+
         return getDefaultLocalizedName({
           messageFile: messageFileName,
           manifestData: manifestWithoutApps,
@@ -127,8 +159,9 @@ describe('build', () => {
           .then(makeSureItFails())
           .catch((error) => {
             assert.instanceOf(error, UsageError);
-            assert.match(error.message, /Unexpected token '"' at 1:15/);
-            assert.match(error.message, /^Error parsing messages.json/);
+            assert.match(
+              error.message, /Unexpected string in JSON at position 14/);
+            assert.match(error.message, /^Error parsing messages\.json/);
             assert.include(error.message, messageFileName);
           });
       }
@@ -140,11 +173,14 @@ describe('build', () => {
       (tmpDir) => {
         const messageFileName = path.join(tmpDir.path(), 'messages.json');
         //This is missing the 'message' key
-        fs.writeFileSync(messageFileName,
+        fs.writeFileSync(
+          messageFileName,
           `{"extensionName": {
               "description": "example extension"
               }
-          }`);
+          }`
+        );
+
         const basicLocalizedManifest = {
           name: '__MSG_extensionName__',
           version: '0.0.1',
@@ -178,7 +214,7 @@ describe('build', () => {
           /Error: ENOENT: no such file or directory, open .*messages.json/);
         assert.match(error.message, /^Error reading messages.json/);
         assert.include(error.message,
-          '/path/to/non-existent-dir/messages.json');
+                       '/path/to/non-existent-dir/messages.json');
       });
   });
 
@@ -263,16 +299,20 @@ describe('build', () => {
           return buildResult;
         })
         .then((buildResult) => {
-          assert.equal(onSourceChange.called, true);
           const args = onSourceChange.firstCall.args[0];
-          assert.equal(args.sourceDir, sourceDir);
-          assert.equal(args.artifactsDir, artifactsDir);
+
+          sinon.assert.called(onSourceChange);
+          sinon.assert.calledWithMatch(onSourceChange, {
+            artifactsDir,
+            sourceDir,
+          });
+
           assert.typeOf(args.onChange, 'function');
 
           // Make sure it uses the file filter.
           assert.typeOf(args.shouldWatchFile, 'function');
           args.shouldWatchFile('/some/path');
-          assert.equal(fileFilter.wantFile.called, true);
+          sinon.assert.called(fileFilter.wantFile);
 
           // Remove the built extension.
           return fs.unlink(buildResult.extensionPath)
@@ -304,9 +344,8 @@ describe('build', () => {
         manifestData: basicManifest, onSourceChange, packageCreator,
       })
         .then(() => {
-          assert.equal(onSourceChange.called, true);
-          assert.equal(packageCreator.callCount, 1);
-
+          sinon.assert.called(onSourceChange);
+          sinon.assert.calledOnce(packageCreator);
           const {onChange} = onSourceChange.firstCall.args[0];
           packageResult = Promise.reject(new Error(
             'Simulate an error on the second call to packageCreator()'));
@@ -358,6 +397,40 @@ describe('build', () => {
                          /minimal_extension-1\.0\.zip$/);
           });
       });
+  });
+
+  it('zips a package and includes a file from a negated filter', () => {
+    const zipFile = new ZipFile();
+
+    return withTempDir(
+      (tmpDir) =>
+        build({
+          sourceDir: fixturePath('minimal-web-ext'),
+          artifactsDir: tmpDir.path(),
+          ignoreFiles: [
+            '!node_modules',
+            '!node_modules/pkg1',
+            '!node_modules/pkg1/**',
+          ],
+        })
+          .then((buildResult) => {
+            assert.match(buildResult.extensionPath,
+                         /minimal_extension-1\.0\.zip$/);
+            return buildResult.extensionPath;
+          })
+          .then((extensionPath) => zipFile.open(extensionPath))
+          .then(() => zipFile.extractFilenames())
+          .then((fileNames) => {
+            fileNames.sort();
+            assert.deepEqual(fileNames, [
+              'background-script.js', 'manifest.json',
+              'node_modules/',
+              'node_modules/pkg1/',
+              'node_modules/pkg1/file1.txt',
+            ]);
+            return zipFile.close();
+          })
+    );
   });
 
   describe('safeFileName', () => {
