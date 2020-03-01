@@ -88,10 +88,31 @@ export class RemoteFirefox {
     });
   }
 
+  lastAddonsActor: Object;
+
   installTemporaryAddon(
     addonPath: string
   ): Promise<FirefoxRDPResponseAddon> {
     return new Promise((resolve, reject) => {
+      const doRequest = () => {
+        this.client.client.makeRequest({
+          to: this.lastAddonsActor,
+          type: 'installTemporaryAddon',
+          addonPath,
+        }, (installResponse) => {
+          if (installResponse.error) {
+            return reject(new WebExtError(
+              'installTemporaryAddon: Error: ' +
+              `${installResponse.error}: ${installResponse.message}`));
+          }
+          log.debug(
+            `installTemporaryAddon: ${JSON.stringify(installResponse)}`);
+          log.info(`Installed ${addonPath} as a temporary add-on`);
+          resolve(installResponse);
+        });
+      };
+
+      if (!this.lastAddonsActor) {
       this.client.request('listTabs', (error, tabsResponse) => {
         if (error) {
           return reject(new WebExtError(
@@ -107,22 +128,13 @@ export class RemoteFirefox {
             'higher.'));
         }
 
-        this.client.client.makeRequest({
-          to: tabsResponse.addonsActor,
-          type: 'installTemporaryAddon',
-          addonPath,
-        }, (installResponse) => {
-          if (installResponse.error) {
-            return reject(new WebExtError(
-              'installTemporaryAddon: Error: ' +
-              `${installResponse.error}: ${installResponse.message}`));
-          }
-          log.debug(
-            `installTemporaryAddon: ${JSON.stringify(installResponse)}`);
-          log.info(`Installed ${addonPath} as a temporary add-on`);
-          resolve(installResponse);
-        });
+        this.lastAddonsActor = tabsResponse.addonsActor;
+        doRequest();
       });
+      }
+      else {
+        doRequest();
+      }
     });
   }
 
