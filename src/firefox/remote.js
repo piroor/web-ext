@@ -113,24 +113,24 @@ export class RemoteFirefox {
       };
 
       if (!this.lastAddonsActor) {
-      this.client.request('listTabs', (error, tabsResponse) => {
-        if (error) {
-          return reject(new WebExtError(
-            `Remote Firefox: listTabs() error: ${error}`));
-        }
-        if (!tabsResponse.addonsActor) {
-          log.debug(
-            'listTabs returned a falsey addonsActor: ' +
-            `${tabsResponse.addonsActor}`);
-          return reject(new RemoteTempInstallNotSupported(
-            'This is an older version of Firefox that does not provide an ' +
-            'add-ons actor for remote installation. Try Firefox 49 or ' +
-            'higher.'));
-        }
+        this.client.request('listTabs', (error, tabsResponse) => {
+          if (error) {
+            return reject(new WebExtError(
+              `Remote Firefox: listTabs() error: ${error}`));
+          }
+          if (!tabsResponse.addonsActor) {
+            log.debug(
+              'listTabs returned a falsey addonsActor: ' +
+              `${tabsResponse.addonsActor}`);
+            return reject(new RemoteTempInstallNotSupported(
+              'This is an older version of Firefox that does not provide an ' +
+              'add-ons actor for remote installation. Try Firefox 49 or ' +
+              'higher.'));
+          }
 
-        this.lastAddonsActor = tabsResponse.addonsActor;
-        doRequest();
-      });
+          this.lastAddonsActor = tabsResponse.addonsActor;
+          doRequest();
+        });
       }
       else {
         doRequest();
