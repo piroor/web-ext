@@ -73,8 +73,8 @@ version on the command line with this:
 ## Installation from source
 
 You'll need:
-* [Node.js](https://nodejs.org/en/), 6.0.0 or higher
-* [npm](https://www.npmjs.com/), 3.0.0 or higher is recommended
+* [Node.js](https://nodejs.org/en/), 10.0.0 or higher
+* [npm](https://www.npmjs.com/), 5.6.0 or higher is recommended
 
 Optionally, you may like:
 * [nvm](https://github.com/creationix/nvm), which helps manage node versions
@@ -199,7 +199,7 @@ Here is a partial list of examples:
 * Integrating with services.
   * Mozilla offers some useful services such as
     [linting](https://github.com/mozilla/addons-linter) and
-    [signing](http://olympia.readthedocs.org/en/latest/topics/api/signing.html)
+    [signing](https://addons-server.readthedocs.io/en/latest/topics/api/signing.html)
     extensions.
 
 [web-ext-user-docs]: https://developer.mozilla.org/en-US/Add-ons/WebExtensions/Getting_started_with_web-ext

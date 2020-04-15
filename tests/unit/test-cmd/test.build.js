@@ -82,7 +82,20 @@ describe('build', () => {
           .then((buildResult) => {
             assert.match(buildResult.extensionPath,
                          /name_of_the_extension-1\.0\.zip$/);
-            return buildResult.extensionPath;
+          })
+    );
+  });
+
+  it('accept a dash in the default_locale field', () => {
+    return withTempDir(
+      (tmpDir) =>
+        build({
+          sourceDir: fixturePath('dashed-locale'),
+          artifactsDir: tmpDir.path(),
+        })
+          .then((buildResult) => {
+            assert.match(buildResult.extensionPath,
+                         /extension_with_dashed_locale-1\.0\.zip$/);
           })
     );
   });
@@ -115,6 +128,22 @@ describe('build', () => {
       }
     );
   });
+
+  it('handles UTF-8 BOM in messages.json', () => withTempDir(
+    async (tmpDir) => {
+      const manifestDataWithBOM = '\uFEFF{"name":{"message":"BOM = \uFEFF!"}}';
+      const messageFileName = path.join(tmpDir.path(), 'messages.json');
+      await fs.writeFile(messageFileName, manifestDataWithBOM);
+      const result = await getDefaultLocalizedName({
+        messageFile: messageFileName,
+        manifestData: {
+          name: '__MSG_name__',
+          version: '0.0.1',
+        },
+      });
+      assert.equal(result, 'BOM = \uFEFF!');
+    }
+  ));
 
   it('handles comments in messages.json', () => {
     return withTempDir(

@@ -4,6 +4,7 @@ import {createWriteStream} from 'fs';
 
 import {fs} from 'mz';
 import parseJSON from 'parse-json';
+import stripBom from 'strip-bom';
 import stripJsonComments from 'strip-json-comments';
 import defaultEventToPromise from 'event-to-promise';
 
@@ -78,11 +79,13 @@ export async function getDefaultLocalizedName(
       `Error reading messages.json file at ${messageFile}: ${error}`);
   }
 
+  messageContents = stripBom(messageContents);
+
   try {
-    messageData = parseJSON(stripJsonComments(messageContents), messageFile);
+    messageData = parseJSON(stripJsonComments(messageContents));
   } catch (error) {
     throw new UsageError(
-      `Error parsing messages.json ${error}`);
+      `Error parsing messages.json file at ${messageFile}: ${error}`);
   }
 
   extensionName = manifestData.name.replace(
@@ -131,10 +134,12 @@ export async function defaultPackageCreator(
 
   let extensionName: string = manifestData.name;
 
-  if (manifestData.default_locale) {
+  let {default_locale} = manifestData;
+  if (default_locale) {
+    default_locale = default_locale.replace(/-/g, '_');
     const messageFile = path.join(
       sourceDir, '_locales',
-      manifestData.default_locale, 'messages.json'
+      default_locale, 'messages.json'
     );
     log.debug('Manifest declared default_locale, localizing extension name');
     extensionName = await getDefaultLocalizedName({
@@ -146,7 +151,7 @@ export async function defaultPackageCreator(
   const extensionPath = path.join(artifactsDir, packageName);
 
   // Added 'wx' flags to avoid overwriting of existing package.
-  let stream = createWriteStream(extensionPath, {flags: 'wx'});
+  const stream = createWriteStream(extensionPath, {flags: 'wx'});
 
   stream.write(buffer, () => stream.end());
 
@@ -162,9 +167,9 @@ export async function defaultPackageCreator(
         'Use --overwrite-dest to enable overwriting.');
     }
     log.info(`Destination exists, overwriting: ${extensionPath}`);
-    stream = createWriteStream(extensionPath);
-    stream.write(buffer, () => stream.end());
-    await eventToPromise(stream, 'close');
+    const overwriteStream = createWriteStream(extensionPath);
+    overwriteStream.write(buffer, () => overwriteStream.end());
+    await eventToPromise(overwriteStream, 'close');
   }
 
   if (showReadyMessage) {

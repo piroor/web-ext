@@ -1,44 +1,55 @@
 #!/usr/bin/env node
 
-const shell = require('shelljs');
+const path = require('path');
 
-const config = require('./lib/config');
+const shell = require('shelljs');
+const tmp = require('tmp');
+
+const pkg = require('../package.json');
 const {mochaFunctional} = require('./lib/mocha');
 
 shell.set('-e');
 
+const packageFileName = `${pkg.name}-${pkg.version}.tgz`;
 const testProductionMode = process.env.TEST_PRODUCTION_MODE === '1';
+const testLegacyBundling = process.env.TEST_LEGACY_BUNDLING === '1';
 
-let execBuildOptions = {};
 let execMochaOptions = {};
 
+shell.exec('npm run build', testProductionMode ? {
+  env: {
+    ...process.env,
+    NODE_ENV: 'production',
+  },
+} : {});
+
 if (testProductionMode) {
-  execBuildOptions = {
-    env: {
-      ...process.env,
-      NODE_ENV: 'production',
-    },
-  };
+  const srcDir = process.cwd();
+  const destDir = tmp.tmpNameSync();
+  const packageDir = tmp.tmpNameSync();
+  const npmInstallOptions = ['--production'];
+
+  if (testLegacyBundling) {
+    shell.echo('\nTest in "npm legacy bundling mode"');
+    npmInstallOptions.push('--legacy-bundling');
+  }
 
   execMochaOptions = {
     env: {
       ...process.env,
-      TEST_WEB_EXT_BIN: './artifacts/production/bin/web-ext',
+      TEST_WEB_EXT_BIN: path.join(destDir, 'node_modules', 'web-ext', 'bin', 'web-ext'),
     },
   };
-}
 
-shell.exec('npm run build', execBuildOptions);
-
-if (testProductionMode) {
   shell.echo('\nPreparing web-ext production mode environment...\n');
-  shell.rm('-rf', config.copy.productionModeArtifacts.dest);
-  shell.mkdir('-p', config.copy.productionModeArtifacts.dest);
-  shell.cp('-rf', config.copy.productionModeArtifacts.src,
-           config.copy.productionModeArtifacts.dest);
-
-  shell.pushd(config.copy.productionModeArtifacts.dest);
-  shell.exec('npm install --production');
+  shell.rm('-rf', destDir, packageDir);
+  shell.mkdir('-p', destDir, packageDir);
+  shell.pushd(packageDir);
+  shell.exec(`npm pack ${srcDir}`);
+  shell.popd();
+  shell.pushd(destDir);
+  const pkgPath = path.join(packageDir, packageFileName);
+  shell.exec(`npm install ${npmInstallOptions.join(' ')} ${pkgPath}`);
   shell.popd();
   shell.echo('\nProduction mode environment successfully created.\n');
 }

@@ -1,4 +1,6 @@
 /* @flow */
+import net from 'net';
+
 import {describe, it} from 'mocha';
 import {assert} from 'chai';
 import sinon from 'sinon';
@@ -13,6 +15,7 @@ import {
   connect as defaultConnector,
   connectWithMaxRetries,
   RemoteFirefox,
+  findFreeTcpPort,
 } from '../../../src/firefox/remote';
 import {
   fakeFirefoxClient,
@@ -25,7 +28,7 @@ describe('firefox.remote', () => {
 
   describe('connect', () => {
 
-    function prepareConnection(port = undefined, options = {}) {
+    function prepareConnection(port = 6005, options = {}) {
       options = {
         connectToFirefox:
           sinon.spy(() => Promise.resolve(fakeFirefoxClient())),
@@ -177,6 +180,7 @@ describe('firefox.remote', () => {
         const stubResponse = {requestTypes: ['reload']};
         const conn = makeInstance();
 
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.addonRequest = sinon.spy(() => Promise.resolve(stubResponse));
 
         const returnedAddon = await conn.checkForAddonReloading(addon);
@@ -194,6 +198,7 @@ describe('firefox.remote', () => {
         const stubResponse = {requestTypes: ['install']};
         const conn = makeInstance();
 
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.addonRequest = () => Promise.resolve(stubResponse);
 
         await conn.checkForAddonReloading(addon)
@@ -207,6 +212,7 @@ describe('firefox.remote', () => {
         const addon = fakeAddon();
         const conn = makeInstance();
 
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.addonRequest =
           sinon.spy(() => Promise.resolve({requestTypes: ['reload']}));
         const checkedAddon = await conn.checkForAddonReloading(addon);
@@ -289,9 +295,12 @@ describe('firefox.remote', () => {
         const addon = fakeAddon();
         const conn = makeInstance();
 
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.getInstalledAddon = sinon.spy(() => Promise.resolve(addon));
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.checkForAddonReloading =
           (addonToCheck) => Promise.resolve(addonToCheck);
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.addonRequest = sinon.spy(() => Promise.resolve({}));
 
         await conn.reloadAddon('some-id');
@@ -308,7 +317,9 @@ describe('firefox.remote', () => {
         const addon = fakeAddon();
         const conn = makeInstance();
 
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.getInstalledAddon = () => Promise.resolve(addon);
+        // $FLOW_IGNORE: allow overwrite not writable property for testing purpose.
         conn.checkForAddonReloading =
           sinon.spy((addonToCheck) => Promise.resolve(addonToCheck));
 
@@ -371,6 +382,43 @@ describe('firefox.remote', () => {
           sinon.assert.calledThrice(connectToFirefox);
           assert.equal(error.message, 'failure');
         });
+    });
+
+  });
+
+  describe('findFreeTcpPort', () => {
+    async function promiseServerOnPort(port): Promise<net.Server> {
+      return new Promise((resolve) => {
+        const srv = net.createServer();
+        // $FLOW_FIXME: signature for listen() is missing - see https://github.com/facebook/flow/pull/8290
+        srv.listen(port, '127.0.0.1', () => {
+          resolve(srv);
+        });
+      });
+    }
+
+    it('resolves to a free tcp port', async () => {
+      const port = await findFreeTcpPort();
+      assert.isNumber(port);
+      // Expect a port that is not in the reserved range.
+      assert.isAtLeast(port, 1024);
+
+      // The TCP port can be used to successfully start a TCP server.
+      const srv = await promiseServerOnPort(port);
+      assert.equal(srv.address().port, port);
+
+      // Check that calling tcp port again doesn't return the
+      // previous port (as it is not free anymore).
+      const newPort = await findFreeTcpPort();
+      assert.notStrictEqual(port, newPort);
+      assert.isAtLeast(port, 1024);
+
+      // The new TCP port can be used to successfully start a TCP server.
+      const srv2 = await promiseServerOnPort(newPort);
+      assert.equal(srv2.address().port, newPort);
+
+      srv.close();
+      srv2.close();
     });
 
   });

@@ -15,6 +15,14 @@ const FAKE_REPLIES = [
     processed: true,
     valid: true,
     reviewed: true,
+  },
+  {
+    guid: 'an-addon-guid',
+    active: true,
+    processed: true,
+    valid: true,
+    automated_signing: true,
+    reviewed: true,
     files: [{
       signed: true,
       download_url: 'http://localhost:8989/some-signed-file-1.2.3.xpi',
@@ -43,7 +51,7 @@ http.createServer(function(req, res) {
   } else {
     process.exit(1);
   }
-}).listen(8989, () => {
+}).listen(8989, '127.0.0.1', () => {
   process.stdout.write('listening');
   process.stdout.uncork();
 });

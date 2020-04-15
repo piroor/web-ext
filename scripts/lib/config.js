@@ -1,16 +1,5 @@
 module.exports = {
   clean: ['dist/*'],
-  copy: {
-    productionModeArtifacts: {
-      src: [
-        'package.json',
-        'package-lock.json',
-        'dist/**',
-        'bin/**',
-      ],
-      dest: './artifacts/production',
-    },
-  },
   watch: {
     files: [
       'package.json',

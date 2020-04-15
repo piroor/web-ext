@@ -317,6 +317,60 @@ describe('program.Program', () => {
         sinon.assert.notCalled(checkForUpdates);
       });
   });
+
+  it('does remove environment vars unsupported by the selected command',
+     async () => {
+       const handlerRun = spy();
+       const handlerSpy = spy();
+       const program = new Program(['run', '--another-run-option=from-cli']);
+       const fakeEnv = {
+         WEB_EXT_RUN_OPTION: 'from-env',
+         WEB_EXT_VERBOSE: 'true',
+         WEB_EXT_SIGN_OPTION: 'from-env',
+         // Also include some environment vars that miss the '_' separator
+         // between envPrefix and option name.
+         WEB_EXTANOTHER_RUN_OPTION: 'from-env',
+         WEB_EXTANOTHER_SIGN_OPTION: 'from-env',
+       };
+       program.setGlobalOptions({
+         verbose: {
+           type: 'boolean',
+           demandOption: false,
+           default: false,
+         },
+       });
+       program.command('run', 'some command', handlerRun, {
+         'run-option': {
+           demandOption: true,
+           type: 'string',
+         },
+         'another-run-option': {
+           demandOption: true,
+           default: 'from-default',
+           type: 'string',
+         },
+       });
+       program.command('sign', 'another command', handlerSpy, {
+         'sign-option': {
+           demandOption: true,
+           default: 'from-default',
+           type: 'string',
+         },
+         'another-sign-option': {
+           demandOption: true,
+           default: 'from-default',
+           type: 'string',
+         },
+       });
+
+       // $FLOW_IGNORE: override systemProcess for testing purpose.
+       program.cleanupProcessEnvConfigs({env: fakeEnv});
+       assert.deepEqual(fakeEnv, {
+         WEB_EXT_RUN_OPTION: 'from-env',
+         WEB_EXTANOTHER_RUN_OPTION: 'from-env',
+         WEB_EXT_VERBOSE: 'true',
+       });
+     });
 });
 
 
@@ -443,19 +497,30 @@ describe('program.main', () => {
       });
   });
 
-  it('passes the url of a firefox binary when specified', () => {
+  it('passes the url of a firefox binary when specified', async () => {
     const fakeCommands = fake(commands, {
       run: () => Promise.resolve(),
     });
-    return execProgram(
-      ['run', '--start-url', 'www.example.com'],
-      {commands: fakeCommands})
-      .then(() => {
-        sinon.assert.calledWithMatch(
-          fakeCommands.run,
-          {startUrl: ['www.example.com']}
-        );
-      });
+    const opts = {commands: fakeCommands};
+
+    await execProgram(['run', '--start-url', 'www.example.com'], opts);
+    sinon.assert.calledWithMatch(fakeCommands.run, {
+      startUrl: ['www.example.com'],
+    });
+
+    // Repeat test with multiple urls.
+    await execProgram(
+      ['run', '--start-url', 'www.example.com', 'www.example2.com'],
+      opts
+    );
+    sinon.assert.calledWithMatch(fakeCommands.run, {
+      startUrl: ['www.example.com', 'www.example2.com'],
+    });
+
+    await assert.isRejected(
+      execProgram(['run', '--start-url'], opts),
+      /Not enough arguments following: start-url/
+    );
   });
 
   it('opens browser console when --browser-console is specified', () => {
@@ -469,6 +534,24 @@ describe('program.main', () => {
         sinon.assert.calledWithMatch(
           fakeCommands.run,
           {browserConsole: true}
+        );
+      });
+  });
+
+  it('calls run with a watched file', () => {
+    const watchFile = 'path/to/fake/file.txt';
+
+    const fakeCommands = fake(commands, {
+      run: () => Promise.resolve(),
+    });
+
+    return execProgram(
+      ['run', '--watch-file', watchFile],
+      {commands: fakeCommands})
+      .then(() => {
+        sinon.assert.calledWithMatch(
+          fakeCommands.run,
+          {watchFile}
         );
       });
   });
@@ -709,6 +792,50 @@ describe('program.main', () => {
 
     sinon.assert.called(logStream.makeVerbose);
   });
+
+  it('requires a parameter after --ignore-files', async () => {
+    const fakeCommands = fake(commands);
+    return execProgram(['build', '--ignore-files'], {commands: fakeCommands})
+      .then(makeSureItFails())
+      .catch((error) => {
+        assert.match(
+          error.message, /Not enough arguments following: ignore-files/);
+      });
+  });
+
+  it('supports multiple parameters after --ignore-files', async () => {
+    const fakeCommands = fake(commands, {
+      build: () => Promise.resolve(),
+    });
+    return execProgram(
+      ['build', '--ignore-files', 'f1', 'f2', '-a', 'xxx', '-i', 'f4', 'f3'],
+      {commands: fakeCommands})
+      .then(() => {
+        const options = fakeCommands.build.firstCall.args[0];
+        assert.deepEqual(options.ignoreFiles, ['f1', 'f2', 'f4', 'f3']);
+        assert.equal(options.artifactsDir, 'xxx');
+      });
+  });
+
+  it(
+    'does pass a custom apk component with --firefox-apk-component',
+    async () => {
+      const fakeCommands = fake(commands, {
+        build: () => Promise.resolve(),
+      });
+      await execProgram(
+        [
+          'run',
+          '--firefox-apk-component', 'CustomView',
+          '-t', 'firefox-android',
+        ],
+        {commands: fakeCommands}
+      );
+      const options = fakeCommands.run.firstCall.args[0];
+      assert.equal(options.firefoxApkComponent, 'CustomView');
+    }
+  );
+
 });
 
 describe('program.defaultVersionGetter', () => {

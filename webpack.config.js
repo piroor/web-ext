@@ -1,20 +1,11 @@
 /*eslint prefer-template: 0*/
 var path = require('path');
-var fs = require('fs');
 
 var webpack = require('webpack');
-
-var nodeModules = {};
-
-// This is to filter out node_modules as we don't want them
-// to be made part of any bundles.
-fs.readdirSync('node_modules')
-  .filter(function(x) {
-    return ['.bin'].indexOf(x) === -1;
-  })
-  .forEach(function(mod) {
-    nodeModules[mod] = 'commonjs ' + mod;
-  });
+// Do not bundle any external module, because those are explicitly added as
+// "dependencies" in package.json. Bundling them anyway could result in bugs
+// like https://github.com/mozilla/web-ext/issues/1629
+var nodeExternals = require('webpack-node-externals');
 
 var rules = [
   {
@@ -42,7 +33,13 @@ module.exports = {
   module: {
     rules,
   },
-  externals: nodeModules,
+  externals: [
+    nodeExternals({
+      modulesFromFile: {
+        include: ['dependencies'],
+      },
+    }),
+  ],
   plugins: [
     new webpack.BannerPlugin({
       banner: 'require("source-map-support").install();',
